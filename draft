@@ -2,7 +2,8 @@ import sys
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QLabel, QLineEdit, QPushButton, QMainWindow,
     QVBoxLayout, QHBoxLayout, QMessageBox, QComboBox,
-    QInputDialog, QTableWidget, QTableWidgetItem, QDialog, QFormLayout, QStackedWidget
+    QInputDialog, QTableWidget, QTableWidgetItem, QDialog, QFormLayout, QStackedWidget,
+    QHeaderView
 )
 from PyQt6.QtCore import Qt
 import mysql.connector
@@ -873,47 +874,104 @@ class AdminDashboard(BaseDashboard):
         self.setup_main_area()
 
     def view_logs(self):
-        logs_window = QDialog(self)
-        logs_window.setWindowTitle("System Logs")
-        layout = QVBoxLayout()
+        # Create container widget
+        container = QWidget()
+        layout = QVBoxLayout(container)
 
+        # Add title and search functionality
+        header_layout = QHBoxLayout()
+        title = QLabel("System Logs")
+        title.setStyleSheet("font-size: 14pt; font-weight: bold;")
+        header_layout.addWidget(title)
+
+        search_input = QLineEdit()
+        search_input.setPlaceholderText("Search logs...")
+        search_btn = QPushButton("Search")
+        header_layout.addWidget(search_input)
+        header_layout.addWidget(search_btn)
+        layout.addLayout(header_layout)
+
+        # Create table
         table = QTableWidget()
         table.setColumnCount(5)
         table.setHorizontalHeaderLabels(["Timestamp", "User", "Action", "Details", "Status"])
 
-        connection = connect_to_database(self)
-        if connection:
-            try:
-                cursor = connection.cursor()
-                query = """
-                    SELECT l.timestamp, a.username, l.action, l.details, l.status
-                    FROM system_logs l
-                    LEFT JOIN accounts a ON l.user_id = a.user_id
-                    ORDER BY l.timestamp DESC
-                    LIMIT 1000
-                """
-                cursor.execute(query)
-                logs = cursor.fetchall()
+        # Set table properties for better display
+        table.horizontalHeader().setStretchLastSection(True)
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        table.setAlternatingRowColors(True)
 
-                table.setRowCount(len(logs))
-                for i, log in enumerate(logs):
-                    for j, value in enumerate(log):
-                        table.setItem(i, j, QTableWidgetItem(str(value)))
+        def load_logs(search_term=""):
+            connection = connect_to_database(self)
+            if connection:
+                try:
+                    cursor = connection.cursor()
+                    if search_term:
+                        query = """
+                            SELECT l.timestamp, a.username, l.action, l.details, l.status
+                            FROM system_logs l
+                            LEFT JOIN accounts a ON l.user_id = a.user_id
+                            WHERE l.action LIKE %s 
+                            OR l.details LIKE %s 
+                            OR a.username LIKE %s
+                            OR l.status LIKE %s
+                            ORDER BY l.timestamp DESC
+                            LIMIT 1000
+                        """
+                        search_pattern = f"%{search_term}%"
+                        cursor.execute(query, (search_pattern, search_pattern, search_pattern, search_pattern))
+                    else:
+                        query = """
+                            SELECT l.timestamp, a.username, l.action, l.details, l.status
+                            FROM system_logs l
+                            LEFT JOIN accounts a ON l.user_id = a.user_id
+                            ORDER BY l.timestamp DESC
+                            LIMIT 1000
+                        """
+                        cursor.execute(query)
 
-            finally:
-                cursor.close()
-                connection.close()
+                    logs = cursor.fetchall()
+                    table.setRowCount(len(logs))
 
+                    for i, log in enumerate(logs):
+                        for j, value in enumerate(log):
+                            item = QTableWidgetItem(str(value) if value else "System")
+                            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # Make cells read-only
+                            table.setItem(i, j, item)
+
+                    # Adjust column widths
+                    table.resizeColumnsToContents()
+
+                except mysql.connector.Error as e:
+                    QMessageBox.critical(self, "Error", f"Error loading logs: {str(e)}")
+                finally:
+                    cursor.close()
+                    connection.close()
+
+        # Connect search functionality
+        search_btn.clicked.connect(lambda: load_logs(search_input.text()))
+        search_input.returnPressed.connect(lambda: load_logs(search_input.text()))
+
+        # Add refresh button
+        refresh_btn = QPushButton("Refresh")
+        refresh_btn.clicked.connect(lambda: load_logs())
+        header_layout.addWidget(refresh_btn)
+
+        # Add table to layout
         layout.addWidget(table)
-        logs_window.setLayout(layout)
-        logs_window.exec()
+
+        # Initial load of logs
+        load_logs()
+
+        # Show in main area
+        self.show_table_in_main(container, "System Logs")
 
     def manage_users(self):
         # Create container widget
         container = QWidget()
         layout = QVBoxLayout(container)
 
-        # Add search functionality
+        # Add search bar layout
         search_layout = QHBoxLayout()
         search_input = QLineEdit()
         search_input.setPlaceholderText("Search by name or username...")
@@ -924,11 +982,11 @@ class AdminDashboard(BaseDashboard):
 
         # Create table
         table = QTableWidget()
-        table.setColumnCount(8)
+        table.setColumnCount(6)
         table.setHorizontalHeaderLabels([
-            "Name", "Username", "Role", "Department", "Position", "Status",
-            "Last Login", "Action"
+            "Name", "Username", "Department", "Position", "Status", "Actions"
         ])
+        layout.addWidget(table)
 
         def load_users(search_term=""):
             connection = connect_to_database(self)
@@ -937,14 +995,14 @@ class AdminDashboard(BaseDashboard):
                     cursor = connection.cursor()
                     query = """
                         SELECT p.user_id, p.first_name, p.middle_name, p.last_name,
-                            a.username, a.role, p.department, p.position, a.status, 
-                            a.last_login
+                            a.username, p.department, p.position, a.status
                         FROM profiles p
                         JOIN accounts a ON p.user_id = a.user_id
-                        WHERE CONCAT(p.first_name, ' ', p.middle_name, ' ', p.last_name) 
-                            LIKE %s
-                        OR a.username LIKE %s
-                        ORDER BY a.role, a.status, p.last_name
+                        WHERE a.role != 'Admin' AND (
+                            CONCAT(p.first_name, ' ', p.middle_name, ' ', p.last_name) LIKE %s
+                            OR a.username LIKE %s
+                        )
+                        ORDER BY p.last_name
                     """
                     search_pattern = f"%{search_term}%" if search_term else "%"
                     cursor.execute(query, (search_pattern, search_pattern))
@@ -952,45 +1010,188 @@ class AdminDashboard(BaseDashboard):
 
                     table.setRowCount(len(users))
                     for i, user in enumerate(users):
-                        # ... existing table population code ...
                         user_id = user[0]
                         full_name = f"{user[1]} {user[2]} {user[3]}"
                         table.setItem(i, 0, QTableWidgetItem(full_name))
                         table.setItem(i, 1, QTableWidgetItem(user[4]))
-                        table.setItem(i, 2, QTableWidgetItem(user[5]))
-                        table.setItem(i, 3, QTableWidgetItem(user[6] or "Not Set"))
-                        table.setItem(i, 4, QTableWidgetItem(user[7] or "Not Set"))
-                        table.setItem(i, 5, QTableWidgetItem(user[8]))
-                        table.setItem(i, 6, QTableWidgetItem(str(user[9]) if user[9] else "Never"))
+                        table.setItem(i, 2, QTableWidgetItem(user[5] if user[5] else "Not Set"))
+                        table.setItem(i, 3, QTableWidgetItem(user[6] if user[6] else "Not Set"))
+                        table.setItem(i, 4, QTableWidgetItem(user[7]))
 
-                        # Action buttons
+                        # Edit Button
                         action_widget = QWidget()
                         action_layout = QHBoxLayout()
                         action_layout.setContentsMargins(0, 0, 0, 0)
 
                         edit_btn = QPushButton("Edit")
-
-                        edit_btn.clicked.connect(lambda: self.edit_user(self.get_profile_id()))
+                        edit_btn.clicked.connect(lambda _, uid=user_id: self.edit_user_profile(uid))
 
                         action_layout.addWidget(edit_btn)
                         action_widget.setLayout(action_layout)
-                        table.setCellWidget(i, 7, action_widget)
+                        table.setCellWidget(i, 5, action_widget)
 
                 finally:
                     cursor.close()
                     connection.close()
 
-        # Connect search button
+        # Connect search functionality
         search_btn.clicked.connect(lambda: load_users(search_input.text()))
-
-        # Add table to layout
-        layout.addWidget(table)
 
         # Initial load
         load_users()
 
-        # Show in main area
+        # Show table in main area
         self.show_table_in_main(container, "Manage Users")
+
+    def edit_user_profile(self, user_id):
+        # Create container for editing profile
+        container = QWidget()
+        layout = QVBoxLayout(container)
+
+        form_layout = QFormLayout()
+
+        # Get current profile data
+        connection = connect_to_database(self)
+        if connection:
+            try:
+                cursor = connection.cursor(dictionary=True)
+                query = """
+                    SELECT p.*, a.username, a.status
+                    FROM profiles p
+                    JOIN accounts a ON p.user_id = a.user_id
+                    WHERE p.user_id = %s
+                """
+                cursor.execute(query, (user_id,))
+                profile = cursor.fetchone()
+
+                if profile:
+                    # Display user's full name and username
+                    full_name = f"{profile['first_name']} {profile['middle_name']} {profile['last_name']}"
+                    form_layout.addRow("Name:", QLabel(full_name))
+                    form_layout.addRow("Username:", QLabel(profile['username']))
+
+                    # Editable fields
+                    department_input = QLineEdit(profile['department'] if profile['department'] else "")
+                    position_input = QLineEdit(profile['position'] if profile['position'] else "")
+
+                    status_box = QComboBox()
+                    status_box.addItems(["Active", "Inactive"])
+                    status_box.setCurrentText(profile['status'])
+
+                    # Add editable fields to layout
+                    form_layout.addRow("Department:", department_input)
+                    form_layout.addRow("Position:", position_input)
+                    form_layout.addRow("Status:", status_box)
+
+                    layout.addLayout(form_layout)
+
+                    # Save button
+                    save_btn = QPushButton("Save Changes")
+                    save_btn.clicked.connect(lambda: self.save_profile_updates(
+                        user_id,
+                        {
+                            'department': department_input,
+                            'position': position_input
+                        },
+                        status_box.currentText()
+                    ))
+                    layout.addWidget(save_btn)
+
+            finally:
+                cursor.close()
+                connection.close()
+
+        # Show in main area
+        self.show_table_in_main(container, "Edit User Profile")
+
+    def save_profile_updates(self, user_id, fields, status):
+        connection = connect_to_database(self)
+        if connection:
+            try:
+                cursor = connection.cursor()
+                # Update profiles for department and position
+                profile_query = """
+                    UPDATE profiles 
+                    SET department = %s, position = %s
+                    WHERE user_id = %s
+                """
+                cursor.execute(profile_query, (
+                    fields['department'].text(),
+                    fields['position'].text(),
+                    user_id
+                ))
+
+                # Update accounts for status
+                status_query = """
+                    UPDATE accounts 
+                    SET status = %s
+                    WHERE user_id = %s
+                """
+                cursor.execute(status_query, (status, user_id))
+
+                connection.commit()
+                QMessageBox.information(self, "Success", "Profile updated successfully")
+            except mysql.connector.Error as e:
+                QMessageBox.critical(self, "Error", f"Error updating profile: {str(e)}")
+            finally:
+                cursor.close()
+                connection.close()
+
+    def request_deletion(self):
+        reply = QMessageBox.question(
+            self, 'Confirm Deletion Request',
+            'Are you sure you want to request account deletion? This action cannot be undone once approved.\nYou will be logged out after submitting the request.',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            connection = connect_to_database(self)
+            if connection:
+                try:
+                    cursor = connection.cursor()
+                    connection.start_transaction()
+
+                    # Check if there's already a pending deletion request
+                    cursor.execute("""
+                        SELECT request_id FROM confirmation_requests 
+                        WHERE user_id = %s AND request_type = 'Deletion' 
+                        AND status = 'Pending'
+                    """, (self.user_id,))
+
+                    if cursor.fetchone():
+                        QMessageBox.warning(
+                            self, "Request Exists",
+                            "You already have a pending deletion request.")
+                        return
+
+                    # Create new deletion request
+                    cursor.execute("""
+                        INSERT INTO confirmation_requests 
+                        (user_id, request_type, requested_by, status)
+                        VALUES (%s, 'Deletion', %s, 'Pending')
+                    """, (self.user_id, self.user_id))
+
+                    # Update account status to 'Inactive'
+                    cursor.execute("""
+                        UPDATE accounts 
+                        SET status = 'Inactive'
+                        WHERE user_id = %s
+                    """, (self.user_id,))
+
+                    connection.commit()
+                    QMessageBox.information(
+                        self, "Success",
+                        "Deletion request submitted. You will now be logged out.")
+
+                    # Log out the user
+                    self.logout()
+
+                except mysql.connector.Error as e:
+                    connection.rollback()
+                    QMessageBox.critical(self, "Error", f"Error submitting deletion request: {str(e)}")
+                finally:
+                    cursor.close()
+                    connection.close()
 
     def create_account(self):
         account_window = QDialog(self)
