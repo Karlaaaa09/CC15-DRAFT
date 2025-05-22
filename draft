@@ -761,7 +761,7 @@ class BaseDashboard(QMainWindow):
     def request_deletion(self):
         reply = QMessageBox.question(
             self, 'Confirm Deletion Request',
-            'Are you sure you want to request account deletion? This action cannot be undone once approved.',
+            'Are you sure you want to request account deletion? This action cannot be undone once approved.\nYou will be logged out after submitting the request.',
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
 
@@ -792,10 +792,20 @@ class BaseDashboard(QMainWindow):
                         VALUES (%s, 'Deletion', %s, 'Pending')
                     """, (self.user_id, self.user_id))
 
+                    # Update account status to 'Inactive'
+                    cursor.execute("""
+                        UPDATE accounts 
+                        SET status = 'Inactive'
+                        WHERE user_id = %s
+                    """, (self.user_id,))
+
                     connection.commit()
                     QMessageBox.information(
                         self, "Success",
-                        "Deletion request submitted. Waiting for executive/admin approval.")
+                        "Deletion request submitted. You will now be logged out.")
+
+                    # Log out the user
+                    self.logout()
 
                 except mysql.connector.Error as e:
                     connection.rollback()
@@ -1782,7 +1792,7 @@ class AdminDashboard(BaseDashboard):
     def request_deletion(self):
         reply = QMessageBox.question(
             self, 'Confirm Deletion Request',
-            'Are you sure you want to request account deletion? This action cannot be undone once approved.',
+            'Are you sure you want to request account deletion? This action cannot be undone once approved.\nYou will be logged out after submitting the request.',
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
 
@@ -1813,10 +1823,20 @@ class AdminDashboard(BaseDashboard):
                         VALUES (%s, 'Deletion', %s, 'Pending')
                     """, (self.user_id, self.user_id))
 
+                    # Update account status to 'Inactive'
+                    cursor.execute("""
+                        UPDATE accounts 
+                        SET status = 'Inactive'
+                        WHERE user_id = %s
+                    """, (self.user_id,))
+
                     connection.commit()
                     QMessageBox.information(
                         self, "Success",
-                        "Deletion request submitted. Waiting for executive/admin approval.")
+                        "Deletion request submitted. You will now be logged out.")
+
+                    # Log out the user
+                    self.logout()
 
                 except mysql.connector.Error as e:
                     connection.rollback()
@@ -2414,7 +2434,7 @@ class ExecutiveDashboard(BaseDashboard):
     def request_deletion(self):
         reply = QMessageBox.question(
             self, 'Confirm Deletion Request',
-            'Are you sure you want to request account deletion? This action cannot be undone once approved.',
+            'Are you sure you want to request account deletion? This action cannot be undone once approved.\nYou will be logged out after submitting the request.',
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
 
@@ -2445,10 +2465,20 @@ class ExecutiveDashboard(BaseDashboard):
                         VALUES (%s, 'Deletion', %s, 'Pending')
                     """, (self.user_id, self.user_id))
 
+                    # Update account status to 'Inactive'
+                    cursor.execute("""
+                        UPDATE accounts 
+                        SET status = 'Inactive'
+                        WHERE user_id = %s
+                    """, (self.user_id,))
+
                     connection.commit()
                     QMessageBox.information(
                         self, "Success",
-                        "Deletion request submitted. Waiting for executive/admin approval.")
+                        "Deletion request submitted. You will now be logged out.")
+
+                    # Log out the user
+                    self.logout()
 
                 except mysql.connector.Error as e:
                     connection.rollback()
